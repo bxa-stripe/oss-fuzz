@@ -10,7 +10,6 @@ auto_ccs:
   - mees.delzenne@surrealdb.com
   - emmanuel.keller@surrealdb.com
   - micha.de.vries@surrealdb.com
-  - rushmore@surrealdb.com
   - nathaniel.brough@gmail.com
 
 sanitizers:

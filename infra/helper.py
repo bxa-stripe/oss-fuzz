@@ -85,7 +85,6 @@ LANGUAGE_TO_BASE_BUILDER_IMAGE = {
     'javascript': 'base-builder-javascript',
     'jvm': 'base-builder-jvm',
     'python': 'base-builder-python',
-    'ruby': 'base-builder-ruby',
     'rust': 'base-builder-rust',
     'swift': 'base-builder-swift'
 }

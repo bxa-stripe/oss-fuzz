@@ -15,5 +15,12 @@
 #
 ################################################################################
 
+NIGHTLY_VERSION="nightly"
+
+rustup install $NIGHTLY_VERSION
 cd testsuite/fuzzer
-bash fuzz.sh build-oss-fuzz $OUT
+
+RUSTFLAGS="$RUSTFLAGS --cfg tokio_unstable" cargo +$NIGHTLY_VERSION fuzz build -O -a
+for fuzzer in $(cat fuzz/Cargo.toml | grep "name = " | grep -v "fuzzer-fuzz" | cut -d'"' -f2); do
+  cp ../../target/x86_64-unknown-linux-gnu/release/$fuzzer $OUT/
+done

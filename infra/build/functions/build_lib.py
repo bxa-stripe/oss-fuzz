@@ -580,24 +580,23 @@ def run_build(  # pylint: disable=too-many-arguments, too-many-locals
                               use_build_pool=use_build_pool,
                               experiment=experiment)
   if experiment:
-    with tempfile.NamedTemporaryFile(suffix='source.tgz') as tgz_file:
-      # Archive the necessary files for the build.
-      _tgz_local_build(oss_fuzz_project, tgz_file.name)
-      gcs_client = storage.Client()
-      # This is the automatically created Cloud Build bucket for Cloud Build.
-      bucket_name = gcs_client.project + '_cloudbuild'
-      bucket = gcs_client.bucket(bucket_name)
-      blob_name = f'source/{str(uuid.uuid4())}.tgz'
-      blob = bucket.blob(blob_name)
-      logging.info(f'Uploading project to {bucket_name}/{blob_name}')
-      blob.upload_from_filename(tgz_file.name)
-
-      build_body['source'] = {
-          'storageSource': {
-              'bucket': bucket_name,
-              'object': blob_name,
-          }
-      }
+    with tempfile.NamedTemporaryFile(suffix='build.json') as config_file:
+      config_file.write(bytes(json.dumps(build_body), 'utf-8'))
+      config_file.seek(0)
+      result = subprocess.run([
+          'gcloud',
+          'builds',
+          'submit',
+          '--project=oss-fuzz',
+          f'--config={config_file.name}',
+          '--async',
+          '--format=get(id)',
+      ],
+                              stdout=subprocess.PIPE,
+                              cwd=OSS_FUZZ_ROOT,
+                              encoding='utf-8',
+                              check=True)
+      return result.stdout.strip()
 
   cloudbuild = cloud_build('cloudbuild',
                            'v1',
@@ -631,7 +630,7 @@ def wait_for_build(build_id, credentials, cloud_project):
                                   'INTERNAL_ERROR', 'EXPIRED', 'CANCELLED'):
         # Build done.
         return
-    except (googleapiclient.errors.HttpError, BrokenPipeError):
+    except googleapiclient.errors.HttpError:
       pass
 
     time.sleep(15)  # Avoid rate limiting.
