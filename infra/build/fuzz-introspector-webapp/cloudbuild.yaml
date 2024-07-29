@@ -26,8 +26,11 @@ steps:
     - '--min-instances'
     - '1'
     - '--max-instances'
-    - '10'
+    - '100'
+    - '--cpu'
+    - '4'
     - '--memory'
-    - '8Gi'
+    - '16Gi'
 options:
   machineType: 'E2_HIGHCPU_32'
+timeout: 21600s  # 6 hours

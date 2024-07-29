@@ -15,7 +15,13 @@
 #
 ################################################################################
 
-$SRC/build_cryptofuzz.sh
+# Print date to embed it into build logs
+date
+
+if [ "$SANITIZER" != "introspector" ]; then
+  # Temporarily skip this under introspector
+  $SRC/build_cryptofuzz.sh
+fi
 
 cd $SRC/bitcoin-core/
 
@@ -23,6 +29,11 @@ cd $SRC/bitcoin-core/
 # This will also force static builds
 if [ "$ARCHITECTURE" = "i386" ]; then
   export BUILD_TRIPLET="i686-pc-linux-gnu"
+
+  # Temp workaround
+  mkdir /usr/local/lib/clang/18/lib/linux
+  ln -s /usr/local/lib/clang/18/lib/i386-unknown-linux-gnu/libclang_rt.asan_static.a /usr/local/lib/clang/18/lib/linux/libclang_rt.asan_static-i386.a
+  ln -s /usr/local/lib/clang/18/lib/i386-unknown-linux-gnu/libclang_rt.asan.a /usr/local/lib/clang/18/lib/linux/libclang_rt.asan-i386.a
 else
   export BUILD_TRIPLET="x86_64-pc-linux-gnu"
 fi
@@ -32,22 +43,18 @@ fi
 # Skip CFLAGS for now, to avoid:
 # "/usr/bin/ld: error: Failed to link module lib/libevent.a.llvm.17822.buffer.c: Expected at most one ThinLTO module per bitcode file".
 # export CFLAGS="$CFLAGS -flto=thin"
-export CXXFLAGS="$CXXFLAGS -flto=thin"
-export LDFLAGS="-flto=thin"
+# Skip CXXFLAGS for now, to avoid: undefined reference to __sancov_gen_.
+# export CXXFLAGS="$CXXFLAGS -flto=thin"
+# export LDFLAGS="-flto=thin"
 
-if [ "$ARCHITECTURE" = "i386" ]; then
-# Temporary workaround for building sqlite for 32-bit. Due to https://github.com/google/oss-fuzz/pull/10466#issuecomment-1576658462
-export FIX_32BIT=" -m32"
-fi
-
-export CPPFLAGS="-DBOOST_MULTI_INDEX_ENABLE_SAFE_MODE ${FIX_32BIT:-}"
+export CPPFLAGS="-D_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_DEBUG -DBOOST_MULTI_INDEX_ENABLE_SAFE_MODE"
 
 (
   cd depends
   sed -i --regexp-extended '/.*rm -rf .*extract_dir.*/d' ./funcs.mk  # Keep extracted source
   make HOST=$BUILD_TRIPLET DEBUG=1 NO_QT=1 NO_BDB=1 NO_ZMQ=1 NO_UPNP=1 NO_NATPMP=1 NO_USDT=1 \
        AR=llvm-ar NM=llvm-nm RANLIB=llvm-ranlib STRIP=llvm-strip \
-       CPPFLAGS="$CPPFLAGS" CXXFLAGS="$CXXFLAGS" LDFLAGS="$LDFLAGS" -j$(nproc)
+       -j$(nproc)
 )
 
 # Build the fuzz targets
@@ -59,11 +66,11 @@ sed -i "s|PROVIDE_FUZZ_MAIN_FUNCTION|NEVER_PROVIDE_MAIN_FOR_OSS_FUZZ|g" "./confi
 # * --enable-fuzz, see https://github.com/bitcoin/bitcoin/blob/master/doc/fuzzing.md
 # * CONFIG_SITE, see https://github.com/bitcoin/bitcoin/blob/master/depends/README.md
 if [ "$SANITIZER" = "memory" ]; then
-  CONFIG_SITE="$PWD/depends/$BUILD_TRIPLET/share/config.site" ./configure --enable-fuzz SANITIZER_LDFLAGS="$LIB_FUZZING_ENGINE" --disable-hardening --with-asm=no
-else
-  CONFIG_SITE="$PWD/depends/$BUILD_TRIPLET/share/config.site" ./configure --enable-fuzz SANITIZER_LDFLAGS="$LIB_FUZZING_ENGINE"
+  # _FORTIFY_SOURCE is not compatible with MSAN.
+  export CPPFLAGS="${CPPFLAGS} -U_FORTIFY_SOURCE"
 fi
 
+CONFIG_SITE="$PWD/depends/$BUILD_TRIPLET/share/config.site" ./configure --enable-fuzz SANITIZER_LDFLAGS="$LIB_FUZZING_ENGINE"
 make -j$(nproc)
 
 WRITE_ALL_FUZZ_TARGETS_AND_ABORT="/tmp/a" "./src/test/fuzz/fuzz" || true
@@ -86,6 +93,7 @@ make -j$(nproc)
 
 # Replace the magic string with the actual name of each fuzz target
 for fuzz_target in ${FUZZ_TARGETS[@]}; do
+  df --human-readable ./src
   python3 -c "c_str_target=b\"${fuzz_target}\x00\";c_str_magic=b\"$MAGIC_STR\";dat=open('./src/test/fuzz/fuzz','rb').read();dat=dat.replace(c_str_magic, c_str_target+c_str_magic[len(c_str_target):]);open(\"$OUT/$fuzz_target\",'wb').write(dat)"
 
   chmod +x "$OUT/$fuzz_target"
